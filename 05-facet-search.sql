@@ -128,14 +128,4 @@ The Mirror Crack'd             Jane Marple solves the mystery when a local woman
 
 
 
-/*
-  The result contains:
-    * $hit    - the first ten movies whose plot contains "baseball", returned
-                as rowids and relevance scores. The query above resolves these
-                rowids to titles, years, and genres for application display.
-    * $facet  - genre and rating value counts, year buckets, and the average
-                IMDb rating across the matching movies.
-
-  To facet all documents, remove the $query member.  To use a different
-  full-text condition, change "$contains" (for example, "robot OR android").
-*/
+ 
