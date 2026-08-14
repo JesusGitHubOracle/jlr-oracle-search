@@ -14,8 +14,8 @@ Oracle AI Database 26ai on any platform or Autonomous AI Database,  you can find
 * [Oracle AI Autonomous JSON Database](https://www.oracle.com/autonomous-database/autonomous-json-database/)
 * [Oracle AI Database 26ai](https://www.oracle.com/database/technologies/oracle-database-software-downloads.html)
 
-### Scripts
-
+## Scripts
+### 
 #### `01-oracle-json-user.sql`
 
 Creates the `JSON_TEXT` schema and grants the privileges required to manage Oracle Text indexes. It can also enable the schema for access through Oracle REST Data Services (ORDS), if you want to use the Oracle Database API for MongoDB.
