@@ -1,6 +1,6 @@
 # JSON Full-Text Search with Oracle AI Database 26ai
 
-Oracle AI Database supports JSON data natively with relational database features, including transactions, indexing, declarative querying, and views. JSON data can be stored in the database, indexed, and queried without any need for a schema that defines the data.
+Oracle AI Database supports JSON data natively alongside relational database features, including transactions, indexing, declarative querying, and views. JSON documents can be stored, indexed, and queried without requiring a fixed relational schema for their document attributes.
 
 You can use the Oracle SQL condition `JSON_TEXTCONTAINS` to perform full-text searches over JSON while keeping the JSON data in the Oracle Database.
 
@@ -10,21 +10,34 @@ This repository uses a movies dataset and SQL scripts to demonstrate JSON full-t
 
 ## Prerequisites
 
-Oracle AI Database 26ai on any platform or Autonomous AI Database,  you can find more information on the below links:
+You need access to either Oracle AI Database 26ai or Autonomous AI Database. For more information, see:
+
 * [Oracle AI Autonomous JSON Database](https://www.oracle.com/autonomous-database/autonomous-json-database/)
 * [Oracle AI Database 26ai](https://www.oracle.com/database/technologies/oracle-database-software-downloads.html)
 
 ## Scripts
-### 
-#### `01-oracle-json-user.sql`
 
-Creates the `JSON_TEXT` schema and grants the privileges required to manage Oracle Text indexes. It can also enable the schema for access through Oracle REST Data Services (ORDS), if you want to use the Oracle Database API for MongoDB.
+Run the scripts in this order:
 
-#### `02-json-search-index.sql`
+1. `01-oracle-json-user-ADB.sql` or `01-oracle-json-user-DB.sql`
+2. `02.load-collection.sql`
+3. `03-json-search-index.sql`
+4. `04-synonyms.sql`
+5. `05-facet-search.sql`
 
-Loads the sample dataset into an Oracle JSON collection table. The file is a top-level JSON array, so the script uses `unpackarrays` to load each movie as a document and sets `maxdocsize` to 64 MiB to accommodate the complete source array.
+### `01-oracle-json-user-ADB.sql` and `01-oracle-json-user-DB.sql`
 
-It then creates a JSON search index and includes examples of:
+Creates the `JSON_TEXT` schema and grants the privileges required by the examples, including `DB_DEVELOPER_ROLE`. The Autonomous AI Database version also grants access to `DBMS_CLOUD`; the Oracle AI Database version grants access to a database directory. Both scripts can optionally enable the schema in Oracle REST Data Services (ORDS), which is a prerequisite for using the Oracle Database API for MongoDB.
+
+### `02.load-collection.sql`
+
+Loads the sample dataset into an Oracle JSON collection table from an external table. The source file is [`movies.ndjson`](movies.ndjson), which contains one movie document per line; the complete sample download is available as [`movies-json.zip`](https://github.com/JesusGitHubOracle/jlr-oracle-search/blob/main/movies-json.zip).
+
+For Autonomous AI Database, upload `movies.ndjson` to your OCI Object Storage bucket, create a pre-authenticated request (PAR), and replace the example `movies_par_url` value in the script. For Oracle AI Database, copy `movies.ndjson` to a file system accessible to the database server, create a `movies_dir` `DIRECTORY` object for that location, and grant the schema access to it. The script uses `DBMS_CLOUD.CREATE_EXTERNAL_TABLE` for Autonomous AI Database and the `ORACLE_BIGDATA` driver for Oracle AI Database.
+
+### `03-json-search-index.sql`
+ 
+ Creates a JSON search index and includes examples of:
 
 * `JSON_TEXTCONTAINS` for full-text search on JSON fields
 * Relevance ranking with `SCORE()`
@@ -32,18 +45,6 @@ It then creates a JSON search index and includes examples of:
 * Fuzzy matching  
 * Execution-plan inspection to confirm the Oracle Text domain index is used
 
-#### `03-prefix-matching-mv.sql`
-
-Creates a title-only materialized view and an Oracle Text `CONTEXT` index over it. The `BASIC_WORDLIST` preference enables prefix indexing for three- to twelve-character prefixes, providing an efficient type-ahead pattern.
-
-The materialized view uses `REFRESH COMPLETE ON DEMAND`. Refresh it after a collection reload:
-
-```sql
-BEGIN
-  DBMS_MVIEW.REFRESH('J_MOVIES_TITLE_AC_MV', 'C');
-END;
-/
-```
 
 ### `04-synonyms.sql`
 
@@ -51,10 +52,11 @@ Creates an Oracle Text thesaurus to store synonyms. This  improves search recall
 
 ### `05-facet-search.sql`
 
-Uses `CTX_QUERY.RESULT_SET` to find movies whose plot contains a given search term. It returns the first ten matches together with genre and rating facets, year buckets, and an average IMDb rating.
+Uses `CTX_QUERY.RESULT_SET` to find movies whose plot contains a given search term. It returns the first ten matches together with genre and rating facets, year buckets, and an average IMDb rating. Before running this script, rebuild the JSON search index with `SEARCH_ON TEXT_VALUE_STRING`, as shown in the script; this is required for string facets such as `genres` and `rated`.
 
 ## Reference documentation
 
+* [Database & Cloud Technology Blog - JSON](https://blogs.oracle.com/coretec/category/crt-json)
 * [Loading an array of JSON documents with DBMS_CLOUD](https://docs.oracle.com/en/cloud/paas/autonomous-database/serverless/adbsb/autonomous-json-load-arrays-unpack.html)
 * [Oracle SQL Condition JSON_TEXTCONTAINS](https://docs.oracle.com/en/database/oracle/oracle-database/26/adjsn/oracle-sql-condition-json_textcontains.html)
 * [Oracle Text query operators](https://docs.oracle.com/en/database/oracle/oracle-database/19/ccref/oracle-text-CONTAINS-query-operators.html)
@@ -63,7 +65,6 @@ Uses `CTX_QUERY.RESULT_SET` to find movies whose plot contains a given search te
 * [JSON facet search with CTX_QUERY.RESULT_SET](https://docs.oracle.com/en/database/oracle/oracle-database/26/adjsn/json-facet-search-pl-sql-procedure-ctx_query-result_set.html)
 * [Oracle Text users and roles](https://docs.oracle.com/en/database/oracle/oracle-database/26/ccapp/oracle-text-users-and-roles.html)
 * [Oracle JSON: From relational to document store](https://github.com/JesusGitHubOracle/jlr-oracle-json)
-
 
 ## License
 
