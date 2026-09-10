@@ -1,70 +1,203 @@
-# JSON Full-Text Search with Oracle AI Database 26ai
+# Build Document Oriented Applications using Oracle Autonomous AI JSON Database
 
-Oracle AI Database supports JSON data natively alongside relational database features, including transactions, indexing, declarative querying, and views. JSON documents can be stored, indexed, and queried without requiring a fixed relational schema for their document attributes.
-
-You can use the Oracle SQL condition `JSON_TEXTCONTAINS` to perform full-text searches over JSON while keeping the JSON data in the Oracle Database.
-
-A JSON search index is an Oracle Text index designed specifically for JSON data. It enables efficient word and phrase searches within JSON documents. After creating a JSON search index, you can use the PL/SQL procedure `CTX_QUERY.RESULT_SET` to perform faceted searches over JSON data.
-
-This repository uses a movies dataset and SQL scripts to demonstrate JSON full-text search features, including relevance scoring, prefix matching, fuzzy matching, thesaurus-based synonym expansion, and faceted search over JSON data.
+This repository contains examples of how to use Oracle JSON and the Oracle Database API for MongoDB to keep document-oriented application patterns while running on Oracle Database.
 
 ## Prerequisites
 
-You need access to either Oracle AI Database 26ai or Autonomous AI Database. For more information, see:
+- Oracle AI Autonomous Database or Oracle Database 26ai, on-premises or cloud.
+- Oracle REST Data Services. See [Oracle REST Data Services and Database Actions downloads](https://www.oracle.com/database/sqldeveloper/technologies/db-actions/download/).
+- MongoDB client tools and drivers supported by Oracle Database API for MongoDB. See [Client Tools and Drivers](https://docs.oracle.com/en/database/oracle/mongodb-api/mgapi/support-mongodb-apis-operations-and-data-types-reference.html#GUID-0D110BE7-7BB3-4DC3-9A98-4F517271F2AE) in the Oracle documentation.
 
-* [Oracle AI Autonomous JSON Database](https://www.oracle.com/autonomous-database/autonomous-json-database/)
-* [Oracle AI Database 26ai](https://www.oracle.com/database/technologies/oracle-database-software-downloads.html)
+## Migration
 
-## Scripts
+Directory: `migration/`
 
-Run the scripts in this order:
+These scripts help move MongoDB application databases into Oracle Autonomous AI JSON Database through backup, restore, and index metadata capture.
 
-1. `01-oracle-json-user-ADB.sql` or `01-oracle-json-user-DB.sql`
-2. `02.load-collection.sql`
-3. `03-json-search-index.sql`
-4. `04-synonyms.sql`
-5. `05-facet-search.sql`
+### MongoDB Database Space Report
 
-### `01-oracle-json-user-ADB.sql` and `01-oracle-json-user-DB.sql`
+Use `atlas_database_space.sh` to report the allocated collection storage, index
+storage, and total occupied storage for every application database in an Atlas
+cluster. It excludes `admin`, `config`, `local`, and Atlas internal databases by default.
 
-Creates the `JSON_TEXT` schema and grants the privileges required by the examples, including `DB_DEVELOPER_ROLE`. The Autonomous AI Database version also grants access to `DBMS_CLOUD`; the Oracle AI Database version grants access to a database directory. Both scripts can optionally enable the schema in Oracle REST Data Services (ORDS), which is a prerequisite for using the Oracle Database API for MongoDB.
+```bash
+export MONGO_URI='mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&w=majority'
+./migration/atlas_database_space.sh
+```
 
-### `02.load-collection.sql`
+The connected user needs permission to list databases and run `dbStats` on each
+reported database. Add `--include-system-databases` only when those databases
+also need to be included.
 
-Loads the sample dataset into an Oracle JSON collection table from an external table. The source file is [`movies.ndjson`](movies.ndjson), which contains one movie document per line; the complete sample download is available as [`movies-json.zip`](https://github.com/JesusGitHubOracle/jlr-oracle-search/blob/main/movies-json.zip).
+### MongoDB Collection Space Report
 
-For Autonomous AI Database, upload `movies.ndjson` to your OCI Object Storage bucket, create a pre-authenticated request (PAR), and replace the example `movies_par_url` value in the script. For Oracle AI Database, copy `movies.ndjson` to a file system accessible to the database server, create a `movies_dir` `DIRECTORY` object for that location, and grant the schema access to it. The script uses `DBMS_CLOUD.CREATE_EXTERNAL_TABLE` for Autonomous AI Database and the `ORACLE_BIGDATA` driver for Oracle AI Database.
+Use `atlas_collection_space.sh` to interactively select a database and collection
+and report logical document data plus allocated collection and index storage. For
+sharded collections, the script sums the shard results and prints a per-shard
+breakdown.
 
-### `03-json-search-index.sql`
+```bash
+export MONGO_URI='mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&w=majority'
+./migration/atlas_collection_space.sh
+```
+
+### Backup databases
+
+`backup-app-dbs.sh` backs up MongoDB databases with `mongodump`. Use `APP_DATABASES` to back up a specific list, or set `BACKUP_MODE=all` to back up all databases except `admin`, `local`, and `config`.
+
+```bash
+export MONGO_URI='mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&w=majority'
+export APP_DATABASES='appdb1 appdb2'
+./migration/backup-app-dbs.sh
+
+export BACKUP_MODE='all'
+./migration/backup-app-dbs.sh
+```
+
+### Restore databases
+
+`restore-db-archives.sh` restores every `*.archive.gz` file from a backup directory with `mongorestore`, writes restore logs, and produces a summary file. Set `TARGET_URI` to the target Oracle Database API for MongoDB connection string before running it.
+
+```bash
  
- Creates a JSON search index and includes examples of:
+export TARGET_URI='mongodb://USER:PASSWORD@HOST:PORT/?authMechanism=PLAIN&authSource=$external&ssl=true'
+./restore-db-archives.sh ./backups/20260706_120000
+```
 
-* `JSON_TEXTCONTAINS` for full-text search on JSON fields
-* Relevance ranking with `SCORE()`
-* Prefix matching
-* Fuzzy matching  
-* Execution-plan inspection to confirm the Oracle Text domain index is used
+Common restore options:
 
+```bash
+# Drop existing MongoDB collections before restoring.
+export DROP_EXISTING=1
 
-### `04-synonyms.sql`
+# Skip index restoration if index creation fails or will be handled separately.
+export SKIP_INDEXES=1
 
-Creates an Oracle Text thesaurus to store synonyms. This  improves search recall by expanding queries to match equivalent terms (e.g., searching for "robot" also returns "android" and "cyborg").
+# Write logs somewhere other than ./restore-logs.
+export LOG_DIR=./restore-logs
 
-### `05-facet-search.sql`
+# Tune restore parallelism. Start with values appropriate for the target capacity.
+# PARALLEL_COLLECTIONS restores independent collections concurrently.
+# INSERTION_WORKERS_PER_COLLECTION writes documents concurrently within a collection.
+export PARALLEL_COLLECTIONS=8
+export INSERTION_WORKERS_PER_COLLECTION=8
 
-Uses `CTX_QUERY.RESULT_SET` to find movies whose plot contains a given search term. It returns the first ten matches together with genre and rating facets, year buckets, and an average IMDb rating. Before running this script, rebuild the JSON search index with `SEARCH_ON TEXT_VALUE_STRING`, as shown in the script; this is required for string facets such as `genres` and `rated`.
+./restore-db-archives.sh ./backups/20260706_120000
+```
 
-## Reference documentation
+`PARALLEL_COLLECTIONS` helps only when an archive contains multiple collections. For one-collection archives, such as the archives produced by this script's backup workflow, `INSERTION_WORKERS_PER_COLLECTION` is the setting that can increase restore throughput.
 
-* [Database & Cloud Technology Blog - JSON](https://blogs.oracle.com/coretec/category/crt-json)
-* [Loading an array of JSON documents with DBMS_CLOUD](https://docs.oracle.com/en/cloud/paas/autonomous-database/serverless/adbsb/autonomous-json-load-arrays-unpack.html)
-* [Oracle SQL Condition JSON_TEXTCONTAINS](https://docs.oracle.com/en/database/oracle/oracle-database/26/adjsn/oracle-sql-condition-json_textcontains.html)
-* [Oracle Text query operators](https://docs.oracle.com/en/database/oracle/oracle-database/19/ccref/oracle-text-CONTAINS-query-operators.html)
-* [Oracle Text thesaurus features](https://docs.oracle.com/en/database/oracle/oracle-database/23/ccapp/overview-oracle-text-thesaurus-features.html)
-* [Overview of the JSON Result Set Interface](https://docs.oracle.com/en/database/oracle/oracle-database/26/ccapp/overview-json-result-set-interface.html)
-* [JSON facet search with CTX_QUERY.RESULT_SET](https://docs.oracle.com/en/database/oracle/oracle-database/26/adjsn/json-facet-search-pl-sql-procedure-ctx_query-result_set.html)
-* [Oracle Text users and roles](https://docs.oracle.com/en/database/oracle/oracle-database/26/ccapp/oracle-text-users-and-roles.html)
-* [Oracle JSON: From relational to document store](https://github.com/JesusGitHubOracle/jlr-oracle-json)
+The restore script processes files ending in `.archive.gz`. For example, a backup directory like this:
+
+```text
+backups/20260706_120000/
+  json_aggregations.archive.gz
+  json_orders.archive.gz
+```
+
+restores the databases `json_aggregations` and `json_orders`.
+
+### Extract indexes
+
+`extract-db-indexes.sh` exports collection index definitions from a MongoDB database into JSON files under `indexes/`. Pass the database name and MongoDB URI as arguments. Views are detected and skipped because MongoDB views do not have collection indexes.
+
+```bash
+cd migration
+
+./extract-db-indexes.sh sample_analytics 'mongodb+srv://USER:PASSWORD@cluster.example.mongodb.net/'
+```
+
+Example output:
+
+```text
+Exporting indexes for transactions
+Exporting indexes for accounts
+Exporting indexes for customers
+Skipping view enriched_transactions
+```
+
+The generated files are written to `migration/indexes/` when the script is run from the `migration/` directory:
+
+```text
+indexes/
+  transactions_indexes.json
+  accounts_indexes.json
+  customers_indexes.json
+```
+
+## Aggregation Pipelines
+
+Directory: `aggregations/`
+
+These examples show how to create JSON collection tables, load document data, and compare Oracle SQL/JSON approaches with MongoDB API aggregation pipelines.
+
+Key files:
+
+- `00-create-agg-user.sql` creates the aggregation demo user.
+- `01-enrich-orders-oracle-json.sql` loads order, product, and warehouse JSON collections and builds an enriched order document with Oracle SQL/JSON.
+- `02-enrich-orders-mongoapi.mongodb.js` loads the same data through the MongoDB API and enriches orders with `$lookup`, `$set`, `$unset`, and `$merge`.
+- `03-regex-filter.mongodb.js` demonstrates regex filtering.
+- `04-lookup-plants.mongodb.js` demonstrates lookup patterns across facility and plant documents.
+- `05-lookup-plants-sql.mongodb.js` shows the SQL-oriented equivalent.
+- `06-lookup-offers-sql.mongodb.js` creates `offerSummary` and `ifaOfferDaily100`, matches offer events by offer, widget, country, and date range, then returns rolled-up metrics in a `replacement` array.
+
+## Transactions
+
+Directory: `transactions/`
+
+These examples show how to run MongoDB-style transactions with the Oracle Database API for MongoDB, using a bank transfer scenario with an approval step before commit.
+
+ `bank-transfer.mongodb.js` runs the transfer with MongoDB API reads and updates inside a transaction.
+ `bank-transfer-sqljson.mongodb.js` runs the transfer with SQL/JSON reads and updates through `$sql` inside a MongoDB API transaction.
+
+## Change Streams
+
+Directory: `changeStreams/`
+
+These examples show how to enable `$changeStreams` in preview mode and consume insert, update, and delete events from the MongoDB API.
+
+- `watch-orders.mongodb.js` enables change streams on `xs_orders` and watches for changes.
+- `insert-orders.mongodb.js` inserts and updates a sample order so the watcher can receive events.
+
+## Change Streams Kafka
+
+Directory: `changeStreams-kafka/`
+
+These examples show how to capture Oracle API for MongoDB change stream events with Node.js and publish them to an Apache Kafka topic for downstream processing.
+
+- `mongo-kafka-cdc-cl/` contains the command-line CDC producer, including `cdc-mongodb-to-kafka.js`, which reads change events and publishes them to Kafka.
+- `mongo-kafka-cdc-ui/` contains the browser-based CDC application with connection status, runtime configuration, and a live event timeline for Oracle Database changes and Kafka publishes.
+
+## Text Search
+
+Directory: `search/`
+
+These examples show how to use MongoDB-style `$search` over JSON movie documents stored in Oracle using the MongoDB API.
+
+- `01-create-text-user.sql` creates the text search demo user and grants the required privileges.
+- `02-text-search-orclapi.mongodb.js` demonstrates text search patterns such as single-term search, multi-term search, `matchCriteria`, and fuzzy matching.
+ Sample collection: [mflix_movies.json](https://objectstorage.eu-frankfurt-1.oraclecloud.com/p/E_Hz1fFFFfbbIGstyg3beN0_WP6QQwwzATe_BsPXhCiGUeaSoH0WjLU7tBZnzglZ/n/fro8fl9kuqli/b/bucket-for-ajd-data/o/search/mflix_movies.json)
+
+## Vector Search
+
+Directory: `vectorsearch/`
+
+These examples show semantic search over JSON documents by using vector embeddings together with Oracle JSON collections and the MongoDB API.
+
+- `01-load_all_minilm_model_from_par.sql` loads the MiniLM embedding model.
+- `02-create-vector-embeddings.sql` creates embeddings for movie plot data.
+- `03-embed-prompt.sql` embeds a natural-language prompt.
+- `04-vector-search.mongodb.js` demonstrates vector search through the MongoDB API.
+- Vectorized collection: [mflix_movies_embeddings.json](https://objectstorage.eu-frankfurt-1.oraclecloud.com/p/yZJUDkTpVHdAI4vTUcuofDHWkk8w5sr2DoawtQ4PL9gQ-7hnHuNLH0gvOQNjJIRo/n/fro8fl9kuqli/b/bucket-for-ajd-data/o/search/mflix_movies_embeddings.json)
+ Embedding model: [ALL_MINILM_L12_V2](https://objectstorage.eu-frankfurt-1.oraclecloud.com/p/hWtxHRNpBnQKaxtj5KtGVyQu4VYHqtuqAY4PUReK_6NxCeZRl94vm07lMGZAuOih/n/fro8fl9kuqli/b/bucket-for-ajd-data/o/vector-data/all_MiniLM_L12_v2.onnx)
+
+## References
+
+- [Oracle JSON Developer's Guide](https://docs.oracle.com/en/database/oracle/oracle-database/26/adjsn/)
+- [Oracle AI Vector Search Overview](https://docs.oracle.com/en/database/oracle/oracle-database/26/vecse/overview-ai-vector-search.html)
+- [Oracle Database API for MongoDB](https://docs.oracle.com/en/database/oracle/mongodb-api/mgapi/overview-oracle-database-api-mongodb.html)
+- [Oracle JSON: From relational to document store](https://github.com/JesusGitHubOracle/jlr-oracle-json)
+- [MongoDB Developer Documentation](https://www.mongodb.com/docs/development/)
 
 ## License
 
